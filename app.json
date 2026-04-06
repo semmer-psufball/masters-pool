@@ -1,0 +1,56 @@
+{
+  "expo": {
+    "name": "Masters Pool",
+    "slug": "masters-pool",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1E3A2E"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.semmerw.masterspool2026",
+      "buildNumber": "9",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1E3A2E"
+      },
+      "edgeToEdgeEnabled": true,
+      "package": "com.semmerw.masterspool2026"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-font",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#1E3A2E"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "badb8210-b761-40e2-adf8-84466da8dd28"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/badb8210-b761-40e2-adf8-84466da8dd28"
+    }
+  }
+}
