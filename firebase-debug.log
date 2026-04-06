@@ -1,0 +1,78 @@
+[debug] [2026-04-06T11:08:59.541Z] ----------------------------------------------------------------------
+[debug] [2026-04-06T11:08:59.542Z] Command:       /Users/semmerw/.nvm/versions/node/v22.22.2/bin/node /Users/semmerw/.nvm/versions/node/v22.22.2/bin/firebase deploy --only functions --force
+[debug] [2026-04-06T11:08:59.542Z] CLI Version:   15.13.0
+[debug] [2026-04-06T11:08:59.542Z] Platform:      darwin
+[debug] [2026-04-06T11:08:59.542Z] Node Version:  v22.22.2
+[debug] [2026-04-06T11:08:59.542Z] Time:          Mon Apr 06 2026 07:08:59 GMT-0400 (Eastern Daylight Time)
+[debug] [2026-04-06T11:08:59.542Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-04-06T11:09:00.183Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-04-06T11:09:00.183Z] > authorizing via signed-in user (will.semmer@gmail.com)
+[debug] [2026-04-06T11:09:00.183Z] [iam] checking project masters-pool-777e1 for permissions ["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]
+[debug] [2026-04-06T11:09:00.183Z] Checked if tokens are valid: false, expires at: 1775443060458
+[debug] [2026-04-06T11:09:00.183Z] Checked if tokens are valid: false, expires at: 1775443060458
+[debug] [2026-04-06T11:09:00.183Z] > refreshing access token with scopes: []
+[debug] [2026-04-06T11:09:00.185Z] >>> [apiv2][query] POST https://www.googleapis.com/oauth2/v3/token [none]
+[debug] [2026-04-06T11:09:00.185Z] >>> [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2026-04-06T11:09:00.422Z] <<< [apiv2][status] POST https://www.googleapis.com/oauth2/v3/token 200
+[debug] [2026-04-06T11:09:00.422Z] <<< [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2026-04-06T11:09:00.437Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/masters-pool-777e1:testIamPermissions [none]
+[debug] [2026-04-06T11:09:00.437Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/masters-pool-777e1:testIamPermissions  x-goog-user-project=masters-pool-777e1
+[debug] [2026-04-06T11:09:00.437Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/masters-pool-777e1:testIamPermissions {"permissions":["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]}
+[debug] [2026-04-06T11:09:00.694Z] <<< [apiv2][status] POST https://cloudresourcemanager.googleapis.com/v1/projects/masters-pool-777e1:testIamPermissions 200
+[debug] [2026-04-06T11:09:00.694Z] <<< [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/masters-pool-777e1:testIamPermissions {"permissions":["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]}
+[debug] [2026-04-06T11:09:00.694Z] Checked if tokens are valid: true, expires at: 1775477339423
+[debug] [2026-04-06T11:09:00.694Z] Checked if tokens are valid: true, expires at: 1775477339423
+[debug] [2026-04-06T11:09:00.695Z] >>> [apiv2][query] POST https://iam.googleapis.com/v1/projects/masters-pool-777e1/serviceAccounts/masters-pool-777e1@appspot.gserviceaccount.com:testIamPermissions [none]
+[debug] [2026-04-06T11:09:00.695Z] >>> [apiv2][body] POST https://iam.googleapis.com/v1/projects/masters-pool-777e1/serviceAccounts/masters-pool-777e1@appspot.gserviceaccount.com:testIamPermissions {"permissions":["iam.serviceAccounts.actAs"]}
+[debug] [2026-04-06T11:09:01.030Z] <<< [apiv2][status] POST https://iam.googleapis.com/v1/projects/masters-pool-777e1/serviceAccounts/masters-pool-777e1@appspot.gserviceaccount.com:testIamPermissions 200
+[debug] [2026-04-06T11:09:01.031Z] <<< [apiv2][body] POST https://iam.googleapis.com/v1/projects/masters-pool-777e1/serviceAccounts/masters-pool-777e1@appspot.gserviceaccount.com:testIamPermissions {"permissions":["iam.serviceAccounts.actAs"]}
+[info] 
+[info] === Deploying to 'masters-pool-777e1'...
+[info] 
+[info] i  deploying functions 
+[debug] [2026-04-06T11:09:01.035Z] Checked if tokens are valid: true, expires at: 1775477339423
+[debug] [2026-04-06T11:09:01.036Z] Checked if tokens are valid: true, expires at: 1775477339423
+[debug] [2026-04-06T11:09:01.036Z] >>> [apiv2][query] GET https://cloudresourcemanager.googleapis.com/v1/projects/masters-pool-777e1 [none]
+[debug] [2026-04-06T11:09:01.166Z] <<< [apiv2][status] GET https://cloudresourcemanager.googleapis.com/v1/projects/masters-pool-777e1 200
+[debug] [2026-04-06T11:09:01.166Z] <<< [apiv2][body] GET https://cloudresourcemanager.googleapis.com/v1/projects/masters-pool-777e1 {"projectNumber":"594486724280","projectId":"masters-pool-777e1","lifecycleState":"ACTIVE","name":"masters-pool","labels":{"firebase":"enabled","firebase-core":"disabled"},"createTime":"2026-04-04T02:00:25.091Z"}
+[info] i  functions: preparing codebase default for deployment 
+[info] i  functions: ensuring required API cloudfunctions.googleapis.com is enabled... 
+[info] i  functions: ensuring required API cloudbuild.googleapis.com is enabled... 
+[info] i  artifactregistry: ensuring required API artifactregistry.googleapis.com is enabled... 
+[debug] [2026-04-06T11:09:01.167Z] Checked if tokens are valid: true, expires at: 1775477339423
+[debug] [2026-04-06T11:09:01.167Z] Checked if tokens are valid: true, expires at: 1775477339423
+[debug] [2026-04-06T11:09:01.167Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/masters-pool-777e1/adminSdkConfig [none]
+[debug] [2026-04-06T11:09:01.565Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/masters-pool-777e1/adminSdkConfig 200
+[debug] [2026-04-06T11:09:01.565Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/masters-pool-777e1/adminSdkConfig {"projectId":"masters-pool-777e1","storageBucket":"masters-pool-777e1.firebasestorage.app"}
+[debug] [2026-04-06T11:09:01.566Z] Checked if tokens are valid: true, expires at: 1775477339423
+[debug] [2026-04-06T11:09:01.566Z] Checked if tokens are valid: true, expires at: 1775477339423
+[debug] [2026-04-06T11:09:01.566Z] >>> [apiv2][query] GET https://runtimeconfig.googleapis.com/v1beta1/projects/masters-pool-777e1/configs [none]
+[debug] [2026-04-06T11:09:01.877Z] <<< [apiv2][status] GET https://runtimeconfig.googleapis.com/v1beta1/projects/masters-pool-777e1/configs 200
+[debug] [2026-04-06T11:09:01.878Z] <<< [apiv2][body] GET https://runtimeconfig.googleapis.com/v1beta1/projects/masters-pool-777e1/configs {}
+[debug] [2026-04-06T11:09:01.879Z] Validating nodejs source
+[warn] ⚠  functions: package.json indicates an outdated version of firebase-functions. Please upgrade using npm install --save firebase-functions@latest in your functions directory. 
+[warn] ⚠  functions: Please note that there will be breaking changes when you upgrade. 
+[debug] [2026-04-06T11:09:02.751Z] > [functions] package.json contents: {
+  "name": "masters-pool-functions",
+  "description": "Cloud Functions for Masters Pool",
+  "scripts": {
+    "serve": "firebase emulators:start --only functions",
+    "deploy": "firebase deploy --only functions"
+  },
+  "engines": {
+    "node": "22"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^12.0.0",
+    "firebase-functions": "^5.0.0"
+  }
+}
+[debug] [2026-04-06T11:09:02.751Z] Building nodejs source
+[info] i  functions: Loading and analyzing source code for codebase default to determine what to deploy 
+[debug] [2026-04-06T11:09:02.752Z] Could not find functions.yaml. Must use http discovery
+[debug] [2026-04-06T11:09:02.758Z] Found firebase-functions binary at '/Users/semmerw/masters-pool/functions/node_modules/.bin/firebase-functions'
+[info] Serving at port 8681
+
+[debug] [2026-04-06T11:09:02.960Z] Got response from /__/functions.yaml {"endpoints":{"resolveRound":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"callableTrigger":{},"entryPoint":"resolveRound"},"draftTick":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"scheduleTrigger":{"schedule":"every 1 minutes","retryConfig":{},"timeZone":"America/New_York"},"entryPoint":"draftTick"},"openDraftRound":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"callableTrigger":{},"entryPoint":"openDraftRound"},"autoFillRosters":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"callableTrigger":{},"entryPoint":"autoFillRosters"},"monitorScores":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"scheduleTrigger":{"schedule":"every 5 minutes","retryConfig":{},"timeZone":"America/New_York"},"entryPoint":"monitorScores"},"endOfDaySummary":{"availableMemoryMb":null,"timeoutSeconds":null,"minInstances":null,"maxInstances":null,"ingressSettings":null,"concurrency":null,"serviceAccountEmail":null,"vpc":null,"platform":"gcfv2","labels":{},"scheduleTrigger":{"schedule":"0 20 * * *","retryConfig":{},"timeZone":"America/New_York"},"entryPoint":"endOfDaySummary"}},"specVersion":"v1alpha1","requiredAPIs":[{"api":"cloudscheduler.googleapis.com","reason":"Needed for scheduled functions."}],"extensions":{}}
