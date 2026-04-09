@@ -104,7 +104,7 @@ export function onDraftPicks(callback) {
 export async function submitBid(uid, poolMemberId, playerName, amount, round) {
   // Write bid — one doc per member+player+round combo (supports multiple bids per round)
   await setDoc(doc(db, 'bids', `${round}_${poolMemberId}_${playerName.replace(/[^a-zA-Z0-9]/g, '_')}`), {
-    uid,
+    userId: uid,
     poolMemberId,
     playerName,
     amount,

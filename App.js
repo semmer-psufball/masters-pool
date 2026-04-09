@@ -1206,13 +1206,20 @@ function validateBid(amount, playerName, memberId, myBids, myProposal, draftPick
   const spent = myPicks.reduce((s, p) => s + (p.price || 0), 0);
   const budgetRemaining = AUCTION.totalBudget - spent;
 
+  // Reserve $1 per remaining roster slot (excluding this bid's slot)
+  const slotsAfterThisBid = AUCTION.rosterSize - myPicks.length - 1;
+  const reserveForFuture = Math.max(0, slotsAfterThisBid) * AUCTION.minBid;
+  const spendableBudget = budgetRemaining - reserveForFuture;
+
   // Total of other active bids (exclude the one being edited)
   const otherBidsTotal = myBids
     .filter(b => b.playerName.toLowerCase() !== playerName.toLowerCase())
     .reduce((s, b) => s + (b.amount || 0), 0);
 
-  if (amtNum + otherBidsTotal > budgetRemaining) {
-    return `Over budget. You have $${budgetRemaining} remaining, $${otherBidsTotal} committed to other bids.`;
+  if (amtNum + otherBidsTotal > spendableBudget) {
+    return reserveForFuture > 0
+      ? `Over budget. You have $${budgetRemaining} remaining, $${reserveForFuture} reserved for future picks, $${otherBidsTotal} committed to other bids.`
+      : `Over budget. You have $${budgetRemaining} remaining, $${otherBidsTotal} committed to other bids.`;
   }
 
   // Can't bid on already-won player
@@ -1510,9 +1517,9 @@ const ri = StyleSheet.create({
 // ═══════════════════════════════════════
 // FREE AGENCY SCREEN
 // ═══════════════════════════════════════
-function FreeAgencyView({ draftPicks, memberId, uid }) {
+function FreeAgencyView({ draftPicks, memberId, uid, closeTime }) {
   const [claims, setClaims] = useState({});
-  const countdown = useCountdown(FREE_AGENCY.close);
+  const countdown = useCountdown(closeTime);
 
   useEffect(() => {
     const unsub = onFreeAgencyClaims(setClaims);
@@ -1614,7 +1621,7 @@ function DraftScreen() {
 
   // Free agency
   if (isFreeAgency) {
-    return <FreeAgencyView draftPicks={draftPicks} memberId={memberId} uid={user?.uid} />;
+    return <FreeAgencyView draftPicks={draftPicks} memberId={memberId} uid={user?.uid} closeTime={poolConfig.freeAgencyCloseTime || FREE_AGENCY.close} />;
   }
 
   // Schedule info

@@ -172,6 +172,7 @@ async function resolveCurrentRound(roundNumber) {
 
   // Create a priority queue: all bids sorted by amount desc
   // We process highest bid first across all players
+  // Reserve $1 per remaining roster slot so nobody ends up with $0 and an incomplete roster
   const sortedBids = [...allBids]
     .filter(b => !draftedPlayers.has(b.playerName.toLowerCase()))
     .filter(b => b.amount >= 0 && b.amount <= budgets[b.memberId])
@@ -196,11 +197,13 @@ async function resolveCurrentRound(roundNumber) {
     }
 
     // Get all bids for this player that are still valid
-    const playerBids = sortedBids.filter(b =>
-      b.playerName === playerName &&
-      !resolvedMembers.has(b.memberId) &&
-      b.amount <= localBudgets[b.memberId]
-    );
+    const playerBids = sortedBids.filter(b => {
+      const slotsAfter = ROSTER_SIZE - localRosterCounts[b.memberId] - 1;
+      const reserve = Math.max(0, slotsAfter);
+      return b.playerName === playerName &&
+        !resolvedMembers.has(b.memberId) &&
+        b.amount <= localBudgets[b.memberId] - reserve;
+    });
 
     if (playerBids.length === 0) {
       sortedBids.shift();
@@ -551,6 +554,26 @@ exports.draftTick = onSchedule({
     }
   }
 
+  // ── FREE AGENCY: auto-fill when window closes ──
+  if (phase === "FREE_AGENCY") {
+    const faClose = config.freeAgencyCloseTime ? new Date(config.freeAgencyCloseTime) : null;
+    if (faClose && now >= faClose) {
+      console.log("Free agency window closed — auto-filling remaining rosters...");
+      const filled = await autoFillRostersHelper();
+      if (filled.length > 0) {
+        const allTokens = await getAllPushTokens();
+        const tokens = allTokens.map(t => t.token);
+        const fillLines = filled.map(f => `${MEMBER_NAMES[f.member]}: ${f.player} (FA)`);
+        await sendExpoPush(tokens,
+          "Free agency closed — remaining rosters auto-filled",
+          fillLines.join("\n")
+        );
+      }
+      await sendDraftCompleteSummary();
+    }
+    return;
+  }
+
   // Everything below requires DURING_DRAFT with an active (unresolved) round
   if (phase !== "DURING_DRAFT" || config.roundResolved) return;
 
@@ -595,26 +618,32 @@ exports.draftTick = onSchedule({
     console.log(`Round ${roundNumber} close time reached, resolving...`);
     await resolveCurrentRound(roundNumber);
 
-    // ── 5. POST-DRAFT: after round 5, handle free agency + summary ──
+    // ── 5. POST-DRAFT: after round 5, open free agency window or finalize ──
     if (roundNumber >= 5) {
       const { rosterCounts } = await getDraftState();
       const needsFreeAgency = ALL_MEMBERS.some(id => rosterCounts[id] < ROSTER_SIZE);
 
       if (needsFreeAgency) {
-        console.log("Round 5 resolved — auto-filling incomplete rosters via free agency...");
-        const filled = await autoFillRostersHelper();
-        if (filled.length > 0) {
-          const allTokens = await getAllPushTokens();
-          const tokens = allTokens.map(t => t.token);
-          const fillLines = filled.map(f => `${MEMBER_NAMES[f.member]}: ${f.player} (FA)`);
-          await sendExpoPush(tokens,
-            "Free agency auto-fill complete",
-            fillLines.join("\n")
-          );
-        }
-      }
+        // Give incomplete rosters 6 hours to manually claim free agents
+        const faCloseTime = new Date(now.getTime() + 6 * 60 * 60 * 1000).toISOString();
+        console.log(`Round 5 resolved — opening free agency window until ${faCloseTime}`);
+        await db.doc("pool/config").set({
+          phase: "FREE_AGENCY",
+          freeAgencyCloseTime: faCloseTime,
+        }, { merge: true });
 
-      await sendDraftCompleteSummary();
+        const allTokens = await getAllPushTokens();
+        const tokens = allTokens.map(t => t.token);
+        const membersNeedingPicks = ALL_MEMBERS
+          .filter(id => rosterCounts[id] < ROSTER_SIZE)
+          .map(id => MEMBER_NAMES[id]);
+        await sendExpoPush(tokens,
+          "Free agency is open!",
+          `${membersNeedingPicks.join(", ")} — you have 6 hours to claim your remaining golfers.`
+        );
+      } else {
+        await sendDraftCompleteSummary();
+      }
     }
   }
 });

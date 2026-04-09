@@ -2,65 +2,38 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    match /users/{userId} {
+    // Any authenticated user can read anything
+    match /{document=**} {
       allow read: if request.auth != null;
+    }
+
+    match /users/{userId} {
       allow write: if request.auth != null && request.auth.uid == userId;
     }
 
     match /bids/{bidId} {
-      allow read: if request.auth != null
-                  && resource.data.userId == request.auth.uid;
-      allow create: if request.auth != null
-                    && request.resource.data.userId == request.auth.uid
-                    && request.resource.data.amount is number
-                    && request.resource.data.amount >= 1
-                    && request.resource.data.amount <= 70;
-      allow update, delete: if request.auth != null
-                            && resource.data.userId == request.auth.uid;
+      allow create, update: if request.auth != null;
+      allow delete: if request.auth != null;
     }
 
     match /proposals/{proposalId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null
-                    && request.resource.data.proposedBy == request.auth.uid;
-      allow update: if request.auth != null
-                    && resource.data.proposedBy == request.auth.uid;
-      allow delete: if false;
+      allow create, update: if request.auth != null;
     }
 
-    match /rounds/{roundId} {
-      allow read: if request.auth != null;
-
-      match /bids/{bidId} {
-        allow read: if request.auth != null
-                    && resource.data.userId == request.auth.uid;
-        allow create: if request.auth != null
-                      && request.resource.data.userId == request.auth.uid
-                      && request.resource.data.amount is number
-                      && request.resource.data.amount >= 1
-                      && request.resource.data.amount <= 70;
-        allow update, delete: if request.auth != null
-                              && resource.data.userId == request.auth.uid;
-      }
-
-      match /results/{resultId} {
-        allow read: if request.auth != null;
-        allow write: if false;
-      }
-    }
-
+    // Cloud Functions handle writes to pool, rosters, rounds
     match /pool/{docId} {
-      allow read: if request.auth != null;
       allow write: if false;
     }
 
     match /rosters/{userId} {
-      allow read: if request.auth != null;
       allow write: if false;
     }
 
-    match /{document=**} {
-      allow read, write: if false;
+    match /rounds/{roundId} {
+      allow write: if false;
+      match /{subcol}/{docId} {
+        allow write: if false;
+      }
     }
   }
 }

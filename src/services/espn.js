@@ -21,6 +21,21 @@ function parseCompetitors(competitors, tournamentStatus) {
         })),
       }));
 
+    // Derive "thru" from hole-by-hole data in the latest active round.
+    // ESPN doesn't provide status.thru on the competitor object — we calculate
+    // it from the number of hole linescores in the current round.
+    let thru = '';
+    if (rounds.length > 0) {
+      const latestRound = rounds[rounds.length - 1];
+      const holesPlayed = latestRound.holes.length;
+      if (holesPlayed >= 18) {
+        thru = 'F';
+      } else if (holesPlayed > 0) {
+        thru = String(holesPlayed);
+      }
+      // holesPlayed === 0 means round hasn't started, leave thru as ''
+    }
+
     return {
       id: c.athlete?.id || c.id,
       name: c.athlete?.displayName || c.athlete?.fullName || 'Unknown',
@@ -32,7 +47,7 @@ function parseCompetitors(competitors, tournamentStatus) {
       espnOrder: c.order || 999,
       totalScore: score,
       totalScoreNum: scoreNum,
-      thru: c.status?.thru?.displayValue || '',
+      thru,
       rounds,
       status: c.status?.type?.description || '',
     };
