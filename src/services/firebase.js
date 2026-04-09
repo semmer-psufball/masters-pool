@@ -84,6 +84,15 @@ export function onPoolConfig(callback) {
 }
 
 // ═══════════════════════════════════════
+// ROUND SNAPSHOTS (end-of-round positions)
+// ═══════════════════════════════════════
+export function onRoundSnapshots(callback) {
+  return onSnapshot(doc(db, 'pool', 'roundSnapshots'), (snap) => {
+    callback(snap.exists() ? snap.data() : {});
+  });
+}
+
+// ═══════════════════════════════════════
 // DRAFT
 // ═══════════════════════════════════════
 export function onDraftPicks(callback) {
@@ -113,6 +122,15 @@ export async function withdrawBid(poolMemberId, playerName, round) {
 // PROPOSALS
 // ═══════════════════════════════════════
 export async function submitProposal(uid, poolMemberId, playerName, bidAmount, round) {
+  // Check if another member already proposed this player this round
+  const proposalsSnap = await getDocs(query(collection(db, 'proposals'), where('round', '==', round)));
+  for (const d of proposalsSnap.docs) {
+    const data = d.data();
+    if (data.playerName.toLowerCase() === playerName.toLowerCase() && data.poolMemberId !== poolMemberId) {
+      throw new Error(`${playerName} was already proposed by another member this round`);
+    }
+  }
+
   // A proposal is a doc in the proposals collection: one per member per round
   await setDoc(doc(db, 'proposals', `${round}_${poolMemberId}`), {
     uid,

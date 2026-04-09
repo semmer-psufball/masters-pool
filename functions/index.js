@@ -110,7 +110,38 @@ async function getDraftedGolfers() {
 async function resolveCurrentRound(roundNumber) {
   const { picks, budgets, rosterCounts, draftedPlayers } = await getDraftState();
 
-  // Get all bids for this round
+  // ── Deduplicate proposals: if multiple members proposed the same player,
+  //    keep the earliest by timestamp and delete the rest (+ their bids) ──
+  const proposalsSnap = await db.collection("proposals")
+    .where("round", "==", roundNumber)
+    .get();
+
+  const proposalsByPlayer = {};
+  proposalsSnap.forEach(doc => {
+    const data = doc.data();
+    const key = data.playerName.toLowerCase();
+    if (!proposalsByPlayer[key]) proposalsByPlayer[key] = [];
+    proposalsByPlayer[key].push({ docId: doc.id, ref: doc.ref, ...data });
+  });
+
+  const dedupBatch = db.batch();
+  let dedupCount = 0;
+  for (const [, proposals] of Object.entries(proposalsByPlayer)) {
+    if (proposals.length <= 1) continue;
+    // Keep earliest submission
+    proposals.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    for (let i = 1; i < proposals.length; i++) {
+      const dupe = proposals[i];
+      dedupBatch.delete(dupe.ref);
+      const bidDocId = `${roundNumber}_${dupe.poolMemberId}_${dupe.playerName.replace(/[^a-zA-Z0-9]/g, "_")}`;
+      dedupBatch.delete(db.collection("bids").doc(bidDocId));
+      dedupCount++;
+      console.log(`Dedup: removed ${dupe.poolMemberId}'s duplicate proposal for ${dupe.playerName}`);
+    }
+  }
+  if (dedupCount > 0) await dedupBatch.commit();
+
+  // Get all bids for this round (after dedup)
   const bidsSnapshot = await db.collection("bids")
     .where("round", "==", roundNumber)
     .get();
@@ -143,7 +174,7 @@ async function resolveCurrentRound(roundNumber) {
   // We process highest bid first across all players
   const sortedBids = [...allBids]
     .filter(b => !draftedPlayers.has(b.playerName.toLowerCase()))
-    .filter(b => b.amount >= 1 && b.amount <= budgets[b.memberId])
+    .filter(b => b.amount >= 0 && b.amount <= budgets[b.memberId])
     .sort((a, b) => b.amount - a.amount);
 
   const results = [];
@@ -232,10 +263,10 @@ async function resolveCurrentRound(roundNumber) {
   // Delete all bids and proposals for this round
   const batch = db.batch();
   bidsSnapshot.forEach(doc => batch.delete(doc.ref));
-  const proposalsSnap = await db.collection("proposals")
+  const remainingProposals = await db.collection("proposals")
     .where("round", "==", roundNumber)
     .get();
-  proposalsSnap.forEach(doc => batch.delete(doc.ref));
+  remainingProposals.forEach(doc => batch.delete(doc.ref));
   await batch.commit();
 
   // Update config
@@ -282,29 +313,93 @@ exports.resolveRound = onCall(async (request) => {
 // AUTO-PROPOSE HELPER
 // ═══════════════════════════════════════
 
+async function autoProposeForBrokeMembers(roundNumber) {
+  const { budgets, rosterCounts, draftedPlayers } = await getDraftState();
+  const brokeMembers = ALL_MEMBERS.filter(id =>
+    budgets[id] < 1 && rosterCounts[id] < ROSTER_SIZE
+  );
+  if (brokeMembers.length === 0) return false;
+
+  // Check existing proposals so we don't pick an already-proposed player
+  const proposalsSnap = await db.collection("proposals")
+    .where("round", "==", roundNumber)
+    .get();
+  const proposedPlayers = new Set();
+  proposalsSnap.forEach(doc => proposedPlayers.add(doc.data().playerName.toLowerCase()));
+
+  let proposed = false;
+  for (const memberId of brokeMembers) {
+    // Highest-ranked available = first in MASTERS_FIELD_NAMES not drafted or proposed
+    const player = MASTERS_FIELD_NAMES.find(name =>
+      !draftedPlayers.has(name.toLowerCase()) && !proposedPlayers.has(name.toLowerCase())
+    );
+    if (!player) continue;
+
+    await db.collection("proposals").doc(`${roundNumber}_${memberId}`).set({
+      poolMemberId: memberId,
+      playerName: player,
+      bidAmount: 0,
+      round: roundNumber,
+      autoProposed: true,
+      timestamp: new Date().toISOString(),
+    });
+
+    const bidDocId = `${roundNumber}_${memberId}_${player.replace(/[^a-zA-Z0-9]/g, "_")}`;
+    await db.collection("bids").doc(bidDocId).set({
+      poolMemberId: memberId,
+      playerName: player,
+      amount: 0,
+      round: roundNumber,
+      timestamp: new Date().toISOString(),
+    });
+
+    proposedPlayers.add(player.toLowerCase());
+    console.log(`Auto-proposed ${player} for broke member ${memberId} ($0 budget)`);
+    proposed = true;
+  }
+
+  if (proposed) {
+    const allTokens = await getAllPushTokens();
+    const brokeNames = brokeMembers.map(id => MEMBER_NAMES[id] || id).join(", ");
+    await sendExpoPush(
+      allTokens.map(t => t.token),
+      "Auto-proposals (no budget)",
+      `${brokeNames} had $0 remaining — auto-proposed the highest-ranked available golfer at $0.`
+    );
+  }
+
+  return proposed;
+}
+
 async function autoProposeMissing(roundNumber) {
-  const { rosterCounts, draftedPlayers } = await getDraftState();
+  const { budgets, rosterCounts, draftedPlayers } = await getDraftState();
   const membersNeedingPicks = ALL_MEMBERS.filter(id => rosterCounts[id] < ROSTER_SIZE);
 
   const proposalsSnap = await db.collection("proposals")
     .where("round", "==", roundNumber)
     .get();
   const proposedMembers = new Set();
-  proposalsSnap.forEach(doc => proposedMembers.add(doc.data().poolMemberId));
+  const proposedPlayers = new Set();
+  proposalsSnap.forEach(doc => {
+    const data = doc.data();
+    proposedMembers.add(data.poolMemberId);
+    proposedPlayers.add(data.playerName.toLowerCase());
+  });
 
   let autoProposed = false;
   for (const memberId of membersNeedingPicks) {
     if (proposedMembers.has(memberId)) continue;
 
     const availablePlayer = MASTERS_FIELD_NAMES.find(name =>
-      !draftedPlayers.has(name.toLowerCase())
+      !draftedPlayers.has(name.toLowerCase()) && !proposedPlayers.has(name.toLowerCase())
     );
     if (!availablePlayer) continue;
 
+    const bidAmt = budgets[memberId] >= 1 ? 1 : 0;
     await db.collection("proposals").doc(`${roundNumber}_${memberId}`).set({
       poolMemberId: memberId,
       playerName: availablePlayer,
-      bidAmount: 1,
+      bidAmount: bidAmt,
       round: roundNumber,
       autoProposed: true,
       timestamp: new Date().toISOString(),
@@ -314,11 +409,12 @@ async function autoProposeMissing(roundNumber) {
     await db.collection("bids").doc(bidDocId).set({
       poolMemberId: memberId,
       playerName: availablePlayer,
-      amount: 1,
+      amount: bidAmt,
       round: roundNumber,
       timestamp: new Date().toISOString(),
     });
 
+    proposedPlayers.add(availablePlayer.toLowerCase());
     console.log(`Auto-proposed ${availablePlayer} for ${memberId} (round ${roundNumber})`);
     autoProposed = true;
   }
@@ -449,6 +545,8 @@ exports.draftTick = onSchedule({
         `Round ${nextRoundNum} is now open!`,
         `Propose your player and place your bids. Closes ${closeFormatted}`
       );
+      // Immediately auto-propose for members with $0 budget
+      await autoProposeForBrokeMembers(nextRoundNum);
       return; // Let the next tick handle midpoint/resolve
     }
   }
@@ -522,6 +620,64 @@ exports.draftTick = onSchedule({
 });
 
 // ═══════════════════════════════════════
+// FIX DUPLICATE PROPOSALS
+// ═══════════════════════════════════════
+
+exports.fixDuplicateProposal = onCall(async (request) => {
+  const { round, playerName } = request.data || {};
+  if (!round || !playerName) throw new Error("round and playerName required");
+
+  // Find all proposals for this player in this round
+  const proposalsSnap = await db.collection("proposals")
+    .where("round", "==", round)
+    .get();
+
+  const dupes = [];
+  proposalsSnap.forEach(doc => {
+    const data = doc.data();
+    if (data.playerName.toLowerCase() === playerName.toLowerCase()) {
+      dupes.push({ docId: doc.id, ...data });
+    }
+  });
+
+  if (dupes.length <= 1) {
+    return { message: "No duplicates found", proposals: dupes };
+  }
+
+  // Sort by timestamp — earliest submission wins
+  dupes.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+  const keeper = dupes[0];
+  const toRemove = dupes.slice(1);
+
+  const batch = db.batch();
+  for (const dupe of toRemove) {
+    // Delete duplicate proposal
+    batch.delete(db.collection("proposals").doc(dupe.docId));
+    // Delete corresponding bid
+    const bidDocId = `${round}_${dupe.poolMemberId}_${dupe.playerName.replace(/[^a-zA-Z0-9]/g, "_")}`;
+    batch.delete(db.collection("bids").doc(bidDocId));
+  }
+  await batch.commit();
+
+  return {
+    kept: { member: keeper.poolMemberId, timestamp: keeper.timestamp },
+    removed: toRemove.map(d => ({ member: d.poolMemberId, timestamp: d.timestamp })),
+    message: `Kept ${keeper.poolMemberId}'s proposal (submitted ${keeper.timestamp}). Removed ${toRemove.length} duplicate(s). Those members can now re-propose.`,
+  };
+});
+
+// ═══════════════════════════════════════
+// AUTO-PROPOSE FOR BROKE MEMBERS (manual trigger)
+// ═══════════════════════════════════════
+
+exports.proposeForBrokeMembers = onCall(async (request) => {
+  const { round } = request.data || {};
+  if (!round) throw new Error("round required");
+  const result = await autoProposeForBrokeMembers(round);
+  return { proposed: result };
+});
+
+// ═══════════════════════════════════════
 // OPEN DRAFT ROUND
 // ═══════════════════════════════════════
 
@@ -564,9 +720,174 @@ exports.autoFillRosters = onCall(async (request) => {
 });
 
 // ═══════════════════════════════════════
+// ROUND-END POSITION SNAPSHOTS
+// ═══════════════════════════════════════
+// Runs every 15 minutes during tournament hours (7am-9pm ET).
+// Checks if a tournament round is truly complete (all active players finished),
+// then snapshots each player's position and tied count for accurate scoring.
+
+exports.snapshotRoundEnd = onSchedule({
+  schedule: "every 15 minutes",
+  timeZone: "America/New_York",
+}, async () => {
+  const configDoc = await db.doc("pool/config").get();
+  const config = configDoc.exists ? configDoc.data() : {};
+  if (config.phase !== "TOURNAMENT") return;
+
+  // Only run 7am-9pm ET (scheduler handles timezone)
+  const nowET = new Date().toLocaleString("en-US", { timeZone: "America/New_York" });
+  const hour = new Date(nowET).getHours();
+  if (hour < 7 || hour >= 21) return;
+
+  try {
+    const espnUrl = "https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard?dates=20260409-20260413";
+    const res = await fetch(espnUrl);
+    const data = await res.json();
+    if (!data.events || data.events.length === 0) return;
+
+    const event = data.events.find(e => (e.name || "").toLowerCase().includes("masters")) || data.events[0];
+    const competition = event.competitions?.[0];
+    if (!competition) return;
+
+    const competitors = competition.competitors || [];
+    if (competitors.length === 0) return;
+
+    // Determine which rounds we already have snapshots for
+    const lastSnapshotted = config.lastSnapshottedRound || 0;
+    const targetRound = lastSnapshotted + 1;
+    if (targetRound > 4) return; // All 4 rounds done
+
+    // Check if ALL active players have completed the target round.
+    // "Active" = not cut, not withdrawn, not DNS.
+    // A player has completed round N if they have N linescores entries
+    // AND their status for that round shows "F" (finished) or they have
+    // more rounds than N (meaning they've moved on to N+1).
+    const activePlayers = [];
+    let allFinished = true;
+
+    for (const c of competitors) {
+      const status = (c.status?.type?.description || "").toLowerCase();
+
+      // Skip players who are cut, withdrawn, DNS, DQ
+      if (status === "cut" || status === "withdrawn" || status === "wd" ||
+          status === "did not start" || status === "dns" ||
+          status === "disqualified" || status === "dq") {
+        // Cut only happens after R2, so for R1/R2 snapshots these players are still active
+        if (targetRound <= 2) {
+          const rounds = c.linescores || [];
+          if (rounds.length < targetRound) {
+            allFinished = false;
+            break;
+          }
+        }
+        continue;
+      }
+
+      const rounds = c.linescores || [];
+      if (rounds.length < targetRound) {
+        // Player hasn't started or finished this round yet
+        allFinished = false;
+        break;
+      }
+
+      // Check if the target round is truly finished for this player.
+      // If they have MORE rounds than the target, the target round is done.
+      // If they have exactly targetRound rounds, check the thru/status.
+      if (rounds.length === targetRound) {
+        const thru = c.status?.thru?.displayValue || "";
+        // "F" or "18" or empty (finished) means done; anything else means mid-round
+        // ESPN shows thru as empty or "F" when a round is complete
+        if (thru && thru !== "F" && thru !== "18" && thru !== "-" && thru !== "") {
+          allFinished = false;
+          break;
+        }
+      }
+      // If rounds.length > targetRound, they've already moved on — target round is done
+
+      activePlayers.push(c);
+    }
+
+    if (!allFinished) {
+      console.log(`Round ${targetRound} not yet complete for all players`);
+      return;
+    }
+
+    if (activePlayers.length === 0) {
+      console.log(`No active players found for round ${targetRound} snapshot`);
+      return;
+    }
+
+    // Build position data: sort by total score, compute positions with ties
+    const sorted = [...competitors]
+      .filter(c => {
+        const status = (c.status?.type?.description || "").toLowerCase();
+        // For the snapshot, include all players who have completed this round
+        const rounds = c.linescores || [];
+        return rounds.length >= targetRound &&
+          status !== "did not start" && status !== "dns";
+      })
+      .map(c => {
+        const score = typeof c.score === "string" ? parseInt(c.score) || 0 : (c.score?.value || 0);
+        return {
+          name: c.athlete?.displayName || "Unknown",
+          id: c.athlete?.id || c.id,
+          totalScoreNum: score,
+          status: (c.status?.type?.description || "").toLowerCase(),
+        };
+      })
+      .sort((a, b) => a.totalScoreNum - b.totalScoreNum);
+
+    // Calculate positions with tie awareness
+    let pos = 1;
+    const snapshot = {};
+    for (let i = 0; i < sorted.length; i++) {
+      if (i > 0 && sorted[i].totalScoreNum !== sorted[i - 1].totalScoreNum) {
+        pos = i + 1;
+      }
+      const isCut = sorted[i].status === "cut";
+      const isWd = sorted[i].status === "withdrawn" || sorted[i].status === "wd" ||
+                   sorted[i].status === "disqualified" || sorted[i].status === "dq";
+      const tiedCount = sorted.filter(p => p.totalScoreNum === sorted[i].totalScoreNum &&
+        p.status !== "cut" && p.status !== "withdrawn" && p.status !== "wd").length;
+
+      snapshot[sorted[i].name.toLowerCase()] = {
+        name: sorted[i].name,
+        position: pos,
+        tiedCount: tiedCount || 1,
+        totalScore: sorted[i].totalScoreNum,
+        missedCut: isCut,
+        withdrawn: isWd,
+      };
+    }
+
+    // Write to Firestore
+    await db.doc(`pool/roundSnapshots`).set({
+      [`round${targetRound}`]: snapshot,
+    }, { merge: true });
+
+    // Update config
+    await db.doc("pool/config").update({
+      lastSnapshottedRound: targetRound,
+    });
+
+    console.log(`Snapshot for round ${targetRound} saved: ${Object.keys(snapshot).length} players`);
+
+    // Send notification
+    const allTokens = await getAllPushTokens();
+    const tokens = allTokens.map(t => t.token);
+    await sendExpoPush(tokens,
+      `Round ${targetRound} Complete`,
+      `All scores are final for Round ${targetRound}. Standings updated.`
+    );
+  } catch (e) {
+    console.error("Snapshot error:", e);
+  }
+});
+
+// ═══════════════════════════════════════
 // PUSH NOTIFICATIONS — Score monitoring
 // ═══════════════════════════════════════
-const ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard";
+const ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard?dates=20260409-20260413";
 
 // Check scores every 5 minutes during tournament — birdie/eagle alerts for your golfers
 exports.monitorScores = onSchedule({

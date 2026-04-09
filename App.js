@@ -6,8 +6,9 @@ import { SourceSerif4_400Regular, SourceSerif4_500Medium, SourceSerif4_600SemiBo
 import { DMSans_400Regular, DMSans_500Medium, DMSans_600SemiBold, DMSans_700Bold } from '@expo-google-fonts/dm-sans';
 import { COLORS, FONTS, NAME_FONTS, NUM_FONTS, UI_FONTS, IMAGES, POOL_MEMBERS, AUCTION, SCORING, DRAFT_SCHEDULE, FREE_AGENCY } from './src/constants/theme';
 import { calculatePoolStandings, calculateGolferPoints } from './src/services/scoring';
+import { runMonteCarloAsync } from './src/services/montecarlo';
 import { getLeaderboard, getMastersField, getPlayerProfile } from './src/services/espn';
-import { signInAnon, setupProfile, logOut, onAuthChange, onUserProfile, addFavorite, removeFavorite, onPoolConfig, onDraftPicks, submitBid, withdrawBid, submitProposal, updateProposalBid, onRoundProposals, onRoundBids, claimFreeAgent, onFreeAgencyClaims } from './src/services/firebase';
+import { signInAnon, setupProfile, logOut, onAuthChange, onUserProfile, addFavorite, removeFavorite, onPoolConfig, onDraftPicks, submitBid, withdrawBid, submitProposal, updateProposalBid, onRoundProposals, onRoundBids, claimFreeAgent, onFreeAgencyClaims, onRoundSnapshots } from './src/services/firebase';
 import { registerForPushNotifications } from './src/services/notifications';
 
 const TOP_PAD = Platform.OS === 'ios' ? 54 : 36;
@@ -435,47 +436,88 @@ function PlayerDetailModal({ visible, onClose, player }) {
               if (holes.length === 0) return null;
               const front9 = holes.filter(h => h.hole >= 1 && h.hole <= 9).sort((a, b) => a.hole - b.hole);
               const back9 = holes.filter(h => h.hole >= 10 && h.hole <= 18).sort((a, b) => a.hole - b.hole);
-              const holeColor = (tp) => {
-                if (!tp || tp === 'E') return COLORS.cream;
-                const n = parseInt(tp);
-                if (isNaN(n)) return COLORS.cream;
-                if (n <= -2) return '#4AE86B';
-                if (n < 0) return COLORS.fairwayGreen;
-                return COLORS.overPar;
+
+              const sz = 24;
+              const fs = 13;
+              const HoleScore = ({ h }) => {
+                if (!h) return <Text style={{ fontFamily: NUM_FONTS.bold, fontSize: fs, color: 'rgba(200,184,138,0.25)' }}>-</Text>;
+                const n = parseInt(h.toPar);
+                const rel = isNaN(n) ? 0 : n;
+                const numColor = rel < 0 ? COLORS.fairwayGreen : rel > 0 ? COLORS.overPar : COLORS.cream;
+                const scoreNum = <Text style={{ fontFamily: NUM_FONTS.bold, fontSize: fs, color: numColor }}>{h.display}</Text>;
+
+                if (h.strokes === 1) {
+                  return (
+                    <View style={{ width: sz, height: sz, borderRadius: sz / 2, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' }}>
+                      <Text style={{ fontFamily: NUM_FONTS.bold, fontSize: fs, color: COLORS.darkGreen }}>{h.display}</Text>
+                    </View>
+                  );
+                }
+                if (rel <= -2) {
+                  return (
+                    <View style={{ width: sz, height: sz, borderRadius: sz / 2, borderWidth: 1, borderColor: COLORS.fairwayGreen, alignItems: 'center', justifyContent: 'center' }}>
+                      <View style={{ width: sz - 5, height: sz - 5, borderRadius: (sz - 5) / 2, borderWidth: 1, borderColor: COLORS.fairwayGreen, alignItems: 'center', justifyContent: 'center' }}>
+                        {scoreNum}
+                      </View>
+                    </View>
+                  );
+                }
+                if (rel === -1) {
+                  return (
+                    <View style={{ width: sz, height: sz, borderRadius: sz / 2, borderWidth: 1, borderColor: COLORS.fairwayGreen, alignItems: 'center', justifyContent: 'center' }}>
+                      {scoreNum}
+                    </View>
+                  );
+                }
+                if (rel === 1) {
+                  return (
+                    <View style={{ width: sz, height: sz, borderRadius: 3, borderWidth: 1, borderColor: COLORS.overPar, alignItems: 'center', justifyContent: 'center' }}>
+                      {scoreNum}
+                    </View>
+                  );
+                }
+                if (rel === 2) {
+                  return (
+                    <View style={{ width: sz, height: sz, borderRadius: 3, borderWidth: 1, borderColor: COLORS.overPar, alignItems: 'center', justifyContent: 'center' }}>
+                      <View style={{ width: sz - 5, height: sz - 5, borderRadius: 2, borderWidth: 1, borderColor: COLORS.overPar, alignItems: 'center', justifyContent: 'center' }}>
+                        {scoreNum}
+                      </View>
+                    </View>
+                  );
+                }
+                if (rel >= 3) {
+                  return (
+                    <View style={{ width: sz, height: sz, borderRadius: 3, borderWidth: 1, borderColor: '#E85050', alignItems: 'center', justifyContent: 'center' }}>
+                      <View style={{ width: sz - 5, height: sz - 5, borderRadius: 2, borderWidth: 1, borderColor: '#E85050', alignItems: 'center', justifyContent: 'center' }}>
+                        <Text style={{ fontFamily: NUM_FONTS.bold, fontSize: fs, color: '#E85050' }}>{h.display}</Text>
+                      </View>
+                    </View>
+                  );
+                }
+                return scoreNum;
               };
-              const holeBg = (tp) => {
-                if (!tp || tp === 'E') return 'transparent';
-                const n = parseInt(tp);
-                if (isNaN(n)) return 'transparent';
-                if (n <= -2) return 'rgba(74, 232, 107, 0.15)';
-                if (n < 0) return 'rgba(124, 219, 142, 0.12)';
-                return 'rgba(232, 160, 122, 0.12)';
-              };
+
+              const renderNine = (nums, nineHoles) => (
+                <View style={{ flexDirection: 'row', marginBottom: 4 }}>
+                  {nums.map(n => {
+                    const h = nineHoles.find(x => x.hole === n);
+                    return (
+                      <View key={n} style={{ flex: 1, alignItems: 'center', paddingVertical: 6, marginHorizontal: 1, height: 46, justifyContent: 'flex-end' }}>
+                        <Text style={{ fontFamily: UI_FONTS.medium, fontSize: 9, color: COLORS.softGold, marginBottom: 4 }}>{n}</Text>
+                        <View style={{ width: sz, height: sz, alignItems: 'center', justifyContent: 'center' }}>
+                          <HoleScore h={h} />
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              );
+
               return (
                 <View style={pd.section}>
                   <Text style={pd.sectionTitle}>Current Round — Hole by Hole</Text>
-                  <View style={{ flexDirection: 'row', marginBottom: 4 }}>
-                    {[1,2,3,4,5,6,7,8,9].map(n => {
-                      const h = front9.find(x => x.hole === n);
-                      return (
-                        <View key={n} style={{ flex: 1, alignItems: 'center', paddingVertical: 6, marginHorizontal: 1, backgroundColor: h ? holeBg(h.toPar) : 'transparent', borderRadius: 6 }}>
-                          <Text style={{ fontFamily: UI_FONTS.medium, fontSize: 9, color: COLORS.softGold, marginBottom: 3 }}>{n}</Text>
-                          <Text style={{ fontFamily: NUM_FONTS.bold, fontSize: 14, color: h ? holeColor(h.toPar) : 'rgba(200,184,138,0.25)' }}>{h ? h.display : '-'}</Text>
-                        </View>
-                      );
-                    })}
-                  </View>
-                  <View style={{ flexDirection: 'row' }}>
-                    {[10,11,12,13,14,15,16,17,18].map(n => {
-                      const h = back9.find(x => x.hole === n);
-                      return (
-                        <View key={n} style={{ flex: 1, alignItems: 'center', paddingVertical: 6, marginHorizontal: 1, backgroundColor: h ? holeBg(h.toPar) : 'transparent', borderRadius: 6 }}>
-                          <Text style={{ fontFamily: UI_FONTS.medium, fontSize: 9, color: COLORS.softGold, marginBottom: 3 }}>{n}</Text>
-                          <Text style={{ fontFamily: NUM_FONTS.bold, fontSize: 14, color: h ? holeColor(h.toPar) : 'rgba(200,184,138,0.25)' }}>{h ? h.display : '-'}</Text>
-                        </View>
-                      );
-                    })}
-                  </View>
+                  {renderNine([1,2,3,4,5,6,7,8,9], front9)}
+                  {renderNine([10,11,12,13,14,15,16,17,18], back9)}
                 </View>
               );
             })()}
@@ -541,7 +583,7 @@ const pd = StyleSheet.create({
 // ═══════════════════════════════════════
 // LEADERBOARD
 // ═══════════════════════════════════════
-function MyTeamCard({ players, draftPicks, poolMemberId }) {
+function MyTeamCard({ players, draftPicks, poolMemberId, roundSnapshots }) {
   if (!poolMemberId || !draftPicks || !draftPicks[poolMemberId]) return null;
   const picks = draftPicks[poolMemberId] || [];
   if (picks.length === 0) return null;
@@ -554,16 +596,17 @@ function MyTeamCard({ players, draftPicks, poolMemberId }) {
     const onBoard = players.find(p =>
       p.name && pick.player && p.name.toLowerCase() === pick.player.toLowerCase()
     );
-    if (!onBoard) return { name: pick.player, position: '-', score: '-', points: 0, headshot: getHeadshotUrl(pick.player) };
-    const { total } = calculateGolferPoints(onBoard, players, completedRounds);
+    if (!onBoard) return { name: pick.player, position: '-', score: '-', points: 0, headshot: getHeadshotUrl(pick.player), posNum: 999 };
+    const { total } = calculateGolferPoints(onBoard, players, completedRounds, roundSnapshots || {});
     return {
       name: onBoard.name,
       position: onBoard.positionDisplay || '-',
       score: onBoard.totalScoreNum,
       points: total,
       headshot: getHeadshotUrl(onBoard.name) || onBoard.headshot,
+      posNum: onBoard.position || 999,
     };
-  });
+  }).sort((a, b) => a.posNum - b.posNum);
 
   const teamTotal = Math.round(golferData.reduce((s, g) => s + g.points, 0));
 
@@ -585,6 +628,7 @@ function MyTeamCard({ players, draftPicks, poolMemberId }) {
           <Text style={[mt.score, { color: typeof g.score === 'number' ? sColor(g.score) : COLORS.softGold }]}>
             {typeof g.score === 'number' ? sc(g.score) : g.score}
           </Text>
+          <Text style={[mt.pts, { color: g.points >= 0 ? COLORS.fairwayGreen : COLORS.overPar }]}>{g.points}</Text>
         </View>
       ))}
     </View>
@@ -601,7 +645,8 @@ const mt = StyleSheet.create({
   headshotEmpty: { width: 24, height: 24, borderRadius: 12, marginRight: 8, backgroundColor: COLORS.cardBgHover },
   name: { flex: 1, fontFamily: NAME_FONTS.semiBold, fontSize: 15, color: COLORS.cream },
   pos: { width: 36, fontFamily: NUM_FONTS.semiBold, fontSize: 13, color: COLORS.softGold, textAlign: 'center' },
-  score: { width: 40, fontFamily: NUM_FONTS.bold, fontSize: 14, textAlign: 'right' },
+  score: { width: 36, fontFamily: NUM_FONTS.bold, fontSize: 14, textAlign: 'center' },
+  pts: { width: 34, fontFamily: NUM_FONTS.bold, fontSize: 13, textAlign: 'right' },
 });
 
 // Build owner lookup from draft picks: playerName.lower -> { memberId, member }
@@ -626,8 +671,8 @@ function OwnerBadge({ memberId }) {
   const member = POOL_MEMBERS.find(m => m.id === memberId);
   if (!member) return null;
   return (
-    <View style={{ backgroundColor: MEMBER_COLORS[memberId] || COLORS.softGold, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 6 }}>
-      <Text style={{ fontFamily: UI_FONTS.semiBold, fontSize: 9, color: '#fff', letterSpacing: 0.5 }}>{member.first}</Text>
+    <View style={{ backgroundColor: COLORS.azaleaSoft, borderRadius: 6, width: 18, height: 18, alignItems: 'center', justifyContent: 'center', marginLeft: 5 }}>
+      <Text style={{ fontFamily: UI_FONTS.semiBold, fontSize: 9, color: COLORS.azaleaPink }}>{member.first.charAt(0)}</Text>
     </View>
   );
 }
@@ -639,10 +684,12 @@ function LeaderboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedPlayer, setSelectedPlayer] = useState(null);
   const [draftPicks, setDraftPicks] = useState({});
+  const [roundSnapshots, setRoundSnapshots] = useState({});
 
   useEffect(() => {
     const unsub = onDraftPicks((d) => { setDraftPicks(d.picks || {}); });
-    return unsub;
+    const unsub2 = onRoundSnapshots(setRoundSnapshots);
+    return () => { unsub(); unsub2(); };
   }, []);
 
   const fetchData = useCallback(async () => {
@@ -651,7 +698,7 @@ function LeaderboardScreen() {
     setLoading(false);
     setRefreshing(false);
   }, []);
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); const id = setInterval(fetchData, 120000); return () => clearInterval(id); }, []);
 
   const hasLive = data.players.length > 0;
   // Show live leaderboard when ESPN has competitors AND the event isn't just "Scheduled"
@@ -665,15 +712,15 @@ function LeaderboardScreen() {
   if (!isTournament) {
     return (
       <ScrollView style={lb.screen} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} tintColor={COLORS.gold} />}>
-        {hasDraftPicks && <MyTeamCard players={data.players} draftPicks={draftPicks} poolMemberId={poolMemberId} />}
+        {hasDraftPicks && <MyTeamCard players={data.players} draftPicks={draftPicks} poolMemberId={poolMemberId} roundSnapshots={roundSnapshots} />}
 
         <View style={lb.header}>
-          <View style={{ width: 38 }} />
+          <View style={{ width: 34 }} />
           <View style={{ width: 34 }} />
           <Text style={[lb.hText, { flex: 1 }]}>PLAYER</Text>
-          <Text style={[lb.hText, { width: 50, textAlign: 'center' }]}>TODAY</Text>
-          <Text style={[lb.hText, { width: 50, textAlign: 'center' }]}>THRU</Text>
-          <Text style={[lb.hText, { width: 52, textAlign: 'center' }]}>TOTAL</Text>
+          <Text style={[lb.hText, { width: 44, textAlign: 'center' }]}>TODAY</Text>
+          <Text style={[lb.hText, { width: 40, textAlign: 'center' }]}>THRU</Text>
+          <Text style={[lb.hText, { width: 48, textAlign: 'center' }]}>TOTAL</Text>
         </View>
 
         {loading ? <ActivityIndicator color={COLORS.gold} style={{ marginTop: 40 }} /> :
@@ -710,15 +757,15 @@ function LeaderboardScreen() {
 
   return (
     <ScrollView style={lb.screen} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} tintColor={COLORS.gold} />}>
-      {hasDraftPicks && <MyTeamCard players={players} draftPicks={draftPicks} poolMemberId={poolMemberId} />}
+      {hasDraftPicks && <MyTeamCard players={players} draftPicks={draftPicks} poolMemberId={poolMemberId} roundSnapshots={roundSnapshots} />}
 
       <View style={lb.header}>
-        <View style={{ width: 38 }} />
+        <View style={{ width: 34 }} />
         <View style={{ width: 34 }} />
         <Text style={[lb.hText, { flex: 1 }]}>PLAYER</Text>
-        <Text style={[lb.hText, { width: 42, textAlign: 'center' }]}>TODAY</Text>
-        <Text style={[lb.hText, { width: 42, textAlign: 'center' }]}>THRU</Text>
-        <Text style={[lb.hText, { width: 46, textAlign: 'center' }]}>TOTAL</Text>
+        <Text style={[lb.hText, { width: 44, textAlign: 'center' }]}>TODAY</Text>
+        <Text style={[lb.hText, { width: 40, textAlign: 'center' }]}>THRU</Text>
+        <Text style={[lb.hText, { width: 48, textAlign: 'center' }]}>TOTAL</Text>
       </View>
 
       {players.map((p, i) => {
@@ -766,13 +813,13 @@ const lb = StyleSheet.create({
   hText: { fontFamily: UI_FONTS.semiBold, fontSize: 11, color: COLORS.softGold, letterSpacing: 0.8 },
   row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.subtleBorder },
   rowAlt: { backgroundColor: COLORS.azaleaGlow },
-  pos: { width: 38, fontFamily: NUM_FONTS.semiBold, fontSize: 14, color: COLORS.softGold, textAlign: 'center' },
+  pos: { width: 34, fontFamily: NUM_FONTS.semiBold, fontSize: 14, color: COLORS.softGold, textAlign: 'center' },
   posTop: { color: COLORS.gold },
   headshot: { width: 30, height: 30, borderRadius: 15, marginRight: 10, backgroundColor: COLORS.cardBgHover },
   name: { fontFamily: NAME_FONTS.semiBold, fontSize: 16, color: COLORS.cream },
-  today: { width: 50, fontFamily: NUM_FONTS.bold, fontSize: 14, textAlign: 'center' },
-  thru: { width: 50, fontFamily: NUM_FONTS.regular, fontSize: 13, color: COLORS.softGold, textAlign: 'center' },
-  total: { width: 52, fontFamily: NUM_FONTS.bold, fontSize: 15, textAlign: 'center', color: COLORS.cream },
+  today: { width: 44, fontFamily: NUM_FONTS.bold, fontSize: 14, textAlign: 'center' },
+  thru: { width: 40, fontFamily: NUM_FONTS.regular, fontSize: 13, color: COLORS.softGold, textAlign: 'center' },
+  total: { width: 48, fontFamily: NUM_FONTS.bold, fontSize: 15, textAlign: 'center', color: COLORS.cream },
   rowCut: { opacity: 0.7 },
   cutName: { textDecorationLine: 'line-through', textDecorationColor: COLORS.overPar },
   cutText: { color: 'rgba(200,184,138,0.6)' },
@@ -876,6 +923,13 @@ function PoolTournament({ draftPicks }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [expanded, setExpanded] = useState({});
+  const [roundSnapshots, setRoundSnapshots] = useState({});
+  const [mcResults, setMcResults] = useState(null);
+
+  useEffect(() => {
+    const unsub = onRoundSnapshots(setRoundSnapshots);
+    return unsub;
+  }, []);
 
   const fetchData = useCallback(async () => {
     const r = await getLeaderboard();
@@ -883,7 +937,7 @@ function PoolTournament({ draftPicks }) {
     setLoading(false);
     setRefreshing(false);
   }, []);
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); const id = setInterval(fetchData, 120000); return () => clearInterval(id); }, []);
 
   const toggleExpand = (id) => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
 
@@ -891,7 +945,22 @@ function PoolTournament({ draftPicks }) {
     ? Math.max(...leaderboard.map(p => p.rounds?.length || 0))
     : 0;
 
-  const standings = calculatePoolStandings(POOL_MEMBERS, draftPicks, leaderboard, completedRounds);
+  const golferStandings = calculatePoolStandings(POOL_MEMBERS, draftPicks, leaderboard, completedRounds, roundSnapshots);
+
+  // Run Monte Carlo async — doesn't block render
+  useEffect(() => {
+    if (completedRounds === 0 || leaderboard.length === 0) return;
+    runMonteCarloAsync(POOL_MEMBERS, draftPicks, leaderboard, completedRounds, roundSnapshots)
+      .then(setMcResults);
+  }, [leaderboard, completedRounds, roundSnapshots, draftPicks]);
+
+  // Merge: use golferStandings as base, overlay MC data when available
+  const standings = golferStandings.map(gs => {
+    const mc = mcResults?.standings?.find(m => m.id === gs.id);
+    return mc ? { ...gs, expectedPts: mc.expectedPts, winPct: mc.winPct, rangeLo: mc.rangeLo, rangeHi: mc.rangeHi, pctTop2: mc.pctTop2, pctLast: mc.pctLast } : gs;
+  });
+  const hasScores = completedRounds > 0;
+  const hasMC = !!mcResults;
 
   return (
     <ScrollView style={{ flex: 1, paddingTop: 10 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} tintColor={COLORS.gold} />}>
@@ -900,9 +969,9 @@ function PoolTournament({ draftPicks }) {
         <View style={pl.standingsHeader}>
           <Text style={[pl.standingsHText, { width: 28 }]}>#</Text>
           <Text style={[pl.standingsHText, { flex: 1 }]}>MEMBER</Text>
-          <Text style={[pl.standingsHText, { width: 42, textAlign: 'right' }]}>PTS</Text>
-          <Text style={[pl.standingsHText, { width: 42, textAlign: 'right' }]}>PROJ</Text>
-          <Text style={[pl.standingsHText, { width: 42, textAlign: 'right' }]}>WIN%</Text>
+          <Text style={[pl.standingsHText, { width: 40, textAlign: 'right' }]}>PTS</Text>
+          {hasScores && <Text style={[pl.standingsHText, { width: 40, textAlign: 'right' }]}>PROJ</Text>}
+          {hasScores && <Text style={[pl.standingsHText, { width: 44, textAlign: 'right' }]}>WIN</Text>}
         </View>
         {loading ? <ActivityIndicator color={COLORS.gold} style={{ marginVertical: 20 }} /> :
           standings.map((m, i) => (
@@ -910,9 +979,9 @@ function PoolTournament({ draftPicks }) {
               <Text style={[pl.standingsRank, i < 3 && { color: COLORS.gold }]}>{i + 1}</Text>
               <MemberAvatar member={m} size={24} />
               <Text style={pl.standingsName}>{m.first} {m.last}</Text>
-              <Text style={[pl.standingsPts, { color: m.teamPoints >= 0 ? COLORS.fairwayGreen : COLORS.overPar }]}>{m.teamPoints}</Text>
-              <Text style={pl.standingsProj}>{m.teamProjected}</Text>
-              <Text style={pl.standingsWin}>{m.winPct != null ? `${m.winPct}%` : '-'}</Text>
+              <Text style={[pl.standingsPts, { color: m.teamPoints >= 0 ? COLORS.fairwayGreen : COLORS.overPar }]}>{hasScores ? m.teamPoints : '-'}</Text>
+              {hasScores && <Text style={pl.standingsProj}>{hasMC ? m.expectedPts : '…'}</Text>}
+              {hasScores && <Text style={pl.standingsWin}>{hasMC && m.winPct != null ? `${Math.round(m.winPct)}%` : '…'}</Text>}
             </View>
           ))}
       </View>
@@ -928,7 +997,8 @@ function PoolTournament({ draftPicks }) {
                 <View style={{ flex: 1 }}>
                   <Text style={pl.memberName}>{m.first} {m.last}</Text>
                   <Text style={pl.teamScore}>
-                    <Text style={{ color: m.teamPoints >= 0 ? COLORS.fairwayGreen : COLORS.overPar }}>{m.teamPoints} pts</Text>
+                    <Text style={{ color: m.teamPoints >= 0 ? COLORS.fairwayGreen : COLORS.overPar }}>{hasScores ? `${m.teamPoints} pts` : 'Waiting for R1'}</Text>
+                    {hasScores && hasMC && m.rangeLo != null && <Text style={{ color: COLORS.softGold }}>{`  (${m.rangeLo}–${m.rangeHi})`}</Text>}
                   </Text>
                 </View>
               </View>
@@ -944,7 +1014,11 @@ function PoolTournament({ draftPicks }) {
                   <Text style={[pl.golferHText, { width: 40 }]}>SCORE</Text>
                   <Text style={[pl.golferHText, { width: 36, textAlign: 'right' }]}>PTS</Text>
                 </View>
-                {m.golfers.map((g, j) => (
+                {[...m.golfers].sort((a, b) => {
+                  const pa = typeof a.position === 'string' ? (parseInt(a.position.replace('T','')) || 999) : (a.position || 999);
+                  const pb = typeof b.position === 'string' ? (parseInt(b.position.replace('T','')) || 999) : (b.position || 999);
+                  return pa - pb;
+                }).map((g, j) => (
                   <View key={j} style={[pl.golferRow, g.missedCut && { opacity: 0.5 }]}>
                     <View style={pl.golferNameRow}>
                       <HeadshotImage source={g.headshot || getHeadshotUrl(g.name)} style={pl.golferHeadshot} name={g.name} />
@@ -954,7 +1028,7 @@ function PoolTournament({ draftPicks }) {
                     <Text style={[pl.golferScore, { color: typeof g.score === 'number' ? sColor(g.score) : COLORS.softGold }]}>
                       {typeof g.score === 'number' ? sc(g.score) : g.score}
                     </Text>
-                    <Text style={[pl.golferPts, { color: g.points >= 0 ? COLORS.fairwayGreen : COLORS.overPar }]}>{g.points}</Text>
+                    <Text style={[pl.golferPts, { color: g.points >= 0 ? COLORS.fairwayGreen : COLORS.overPar }]}>{hasScores ? g.points : '-'}</Text>
                   </View>
                 ))}
               </View>
@@ -976,9 +1050,9 @@ const pl = StyleSheet.create({
   standingsRowAlt: { backgroundColor: COLORS.azaleaGlow },
   standingsRank: { width: 28, fontFamily: NUM_FONTS.semiBold, fontSize: 14, color: COLORS.softGold },
   standingsName: { flex: 1, fontFamily: NAME_FONTS.semiBold, fontSize: 16, color: COLORS.cream },
-  standingsPts: { width: 42, fontFamily: NUM_FONTS.bold, fontSize: 15, textAlign: 'right' },
-  standingsProj: { width: 42, fontFamily: NUM_FONTS.regular, fontSize: 13, color: COLORS.softGold, textAlign: 'right' },
-  standingsWin: { width: 42, fontFamily: NUM_FONTS.bold, fontSize: 13, color: COLORS.azaleaPink, textAlign: 'right' },
+  standingsPts: { width: 40, fontFamily: NUM_FONTS.bold, fontSize: 15, textAlign: 'right' },
+  standingsProj: { width: 40, fontFamily: NUM_FONTS.regular, fontSize: 13, color: COLORS.softGold, textAlign: 'right' },
+  standingsWin: { width: 44, fontFamily: NUM_FONTS.bold, fontSize: 13, color: COLORS.azaleaPink, textAlign: 'right' },
   // Member cards
   card: { marginHorizontal: 14, marginBottom: 10, backgroundColor: COLORS.cardBg, borderRadius: 14, overflow: 'hidden' },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14 },
@@ -1152,7 +1226,7 @@ function validateBid(amount, playerName, memberId, myBids, myProposal, draftPick
 // ═══════════════════════════════════════
 // PROPOSE PLAYER MODAL
 // ═══════════════════════════════════════
-function ProposeModal({ visible, onClose, currentRound, draftedNames, draftPicks, memberId, uid }) {
+function ProposeModal({ visible, onClose, currentRound, draftedNames, draftPicks, memberId, uid, proposals }) {
   const { favorites } = React.useContext(UserContext);
   const [search, setSearch] = useState('');
   const [selectedPlayer, setSelectedPlayer] = useState(null);
@@ -1160,7 +1234,16 @@ function ProposeModal({ visible, onClose, currentRound, draftedNames, draftPicks
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const available = MASTERS_FIELD.filter(p => !draftedNames?.has(p.name.toLowerCase()));
+  // Players already proposed this round by OTHER members
+  const proposedNames = new Set(
+    (proposals || [])
+      .filter(p => p.poolMemberId !== memberId)
+      .map(p => p.playerName.toLowerCase())
+  );
+
+  const available = MASTERS_FIELD.filter(p =>
+    !draftedNames?.has(p.name.toLowerCase()) && !proposedNames.has(p.name.toLowerCase())
+  );
   const filtered = search.length > 0
     ? available.filter(p => p.name.toLowerCase().includes(search.toLowerCase()))
     : available;
@@ -1721,6 +1804,7 @@ function DraftScreen() {
             draftPicks={draftPicks}
             memberId={memberId}
             uid={user?.uid}
+            proposals={proposals}
           />
           <BidOnPlayerModal
             visible={!!bidTarget}
@@ -1779,12 +1863,14 @@ function ModelScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [draftPicks, setDraftPicks] = useState({});
+  const [roundSnapshots, setRoundSnapshots] = useState({});
 
   useEffect(() => {
     const unsub = onDraftPicks((data) => {
       setDraftPicks(data.picks || {});
     });
-    return unsub;
+    const unsub2 = onRoundSnapshots(setRoundSnapshots);
+    return () => { unsub(); unsub2(); };
   }, []);
 
   const fetchData = useCallback(async () => {
@@ -1794,7 +1880,7 @@ function ModelScreen() {
     setRefreshing(false);
   }, []);
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); const id = setInterval(fetchData, 120000); return () => clearInterval(id); }, []);
 
   const hasPicks = Object.values(draftPicks).some(picks => picks && picks.length > 0);
 
@@ -1802,9 +1888,23 @@ function ModelScreen() {
     ? Math.max(...leaderboard.map(p => p.rounds?.length || 0))
     : 0;
 
-  const standings = hasPicks
-    ? calculatePoolStandings(POOL_MEMBERS, draftPicks, leaderboard, completedRounds)
+  const golferStandings = hasPicks
+    ? calculatePoolStandings(POOL_MEMBERS, draftPicks, leaderboard, completedRounds, roundSnapshots)
     : [];
+  const [mcResults, setMcResults] = useState(null);
+
+  useEffect(() => {
+    if (!hasPicks || completedRounds === 0 || leaderboard.length === 0) return;
+    runMonteCarloAsync(POOL_MEMBERS, draftPicks, leaderboard, completedRounds, roundSnapshots)
+      .then(setMcResults);
+  }, [leaderboard, completedRounds, roundSnapshots, draftPicks, hasPicks]);
+
+  const standings = golferStandings.map(gs => {
+    const mc = mcResults?.standings?.find(m => m.id === gs.id);
+    return mc ? { ...gs, expectedPts: mc.expectedPts, winPct: mc.winPct, rangeLo: mc.rangeLo, rangeHi: mc.rangeHi, pctTop2: mc.pctTop2, pctLast: mc.pctLast } : gs;
+  });
+  const hasScores = completedRounds > 0;
+  const hasMC = !!mcResults;
 
   if (!hasPicks) {
     return (
@@ -1826,8 +1926,8 @@ function ModelScreen() {
           <Text style={[mo.hText, { width: 28 }]}>#</Text>
           <Text style={[mo.hText, { flex: 1 }]}>MEMBER</Text>
           <Text style={[mo.hText, { width: 44, textAlign: 'right' }]}>PTS</Text>
-          <Text style={[mo.hText, { width: 44, textAlign: 'right' }]}>PROJ</Text>
-          <Text style={[mo.hText, { width: 42, textAlign: 'right' }]}>WIN%</Text>
+          {hasScores && <Text style={[mo.hText, { width: 44, textAlign: 'right' }]}>PROJ</Text>}
+          {hasScores && <Text style={[mo.hText, { width: 48, textAlign: 'right' }]}>WIN%</Text>}
         </View>
         {loading ? <ActivityIndicator color={COLORS.gold} style={{ marginVertical: 20 }} /> :
           standings.map((m, i) => (
@@ -1835,26 +1935,43 @@ function ModelScreen() {
               <Text style={[mo.rank, i < 3 && { color: COLORS.gold }]}>{i + 1}</Text>
               <MemberAvatar member={m} size={24} />
               <Text style={mo.memberName}>{m.first} {m.last}</Text>
-              <Text style={[mo.pts, { color: m.teamPoints >= 0 ? COLORS.fairwayGreen : COLORS.overPar }]}>{m.teamPoints}</Text>
-              <Text style={mo.proj}>{m.teamProjected}</Text>
-              <Text style={{ fontFamily: NUM_FONTS.bold, fontSize: 13, color: COLORS.azaleaPink, width: 42, textAlign: 'right' }}>{m.winPct != null ? `${m.winPct}%` : '-'}</Text>
+              <Text style={[mo.pts, { color: m.teamPoints >= 0 ? COLORS.fairwayGreen : COLORS.overPar }]}>{hasScores ? m.teamPoints : '-'}</Text>
+              {hasScores && <Text style={mo.proj}>{hasMC ? m.expectedPts : '…'}</Text>}
+              {hasScores && <Text style={{ fontFamily: NUM_FONTS.bold, fontSize: 13, color: COLORS.azaleaPink, width: 44, textAlign: 'right' }}>{hasMC && m.winPct != null ? `${Math.round(m.winPct)}%` : '…'}</Text>}
             </View>
           ))}
       </View>
 
-      {/* Member detail cards with golfer projections */}
+      {/* Member detail cards */}
       {!loading && standings.map((m, i) => (
         <View key={m.id} style={mo.card}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
             <MemberAvatar member={m} size={26} />
-            <Text style={mo.cardTitle}>{m.first} {m.last}</Text>
-            <Text style={{ fontFamily: NUM_FONTS.bold, fontSize: 14, color: COLORS.azaleaPink, marginLeft: 'auto' }}>Proj: {m.teamProjected}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={mo.cardTitle}>{m.first} {m.last}</Text>
+            </View>
+            {hasScores && hasMC && <Text style={{ fontFamily: NUM_FONTS.bold, fontSize: 14, color: COLORS.azaleaPink }}>{Math.round(m.winPct)}%</Text>}
           </View>
+          {hasScores && (
+            <View style={{ flexDirection: 'row', justifyContent: 'space-around', marginBottom: 12, paddingVertical: 8, backgroundColor: COLORS.cardBgHover, borderRadius: 8 }}>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{ fontFamily: NUM_FONTS.bold, fontSize: 16, color: m.teamPoints >= 0 ? COLORS.fairwayGreen : COLORS.overPar }}>{m.teamPoints}</Text>
+                <Text style={{ fontFamily: UI_FONTS.medium, fontSize: 9, color: COLORS.softGold, letterSpacing: 0.5, marginTop: 2 }}>ACTUAL</Text>
+              </View>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{ fontFamily: NUM_FONTS.bold, fontSize: 16, color: COLORS.cream }}>{hasMC ? m.expectedPts : '…'}</Text>
+                <Text style={{ fontFamily: UI_FONTS.medium, fontSize: 9, color: COLORS.softGold, letterSpacing: 0.5, marginTop: 2 }}>EXPECTED</Text>
+              </View>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{ fontFamily: NUM_FONTS.bold, fontSize: 16, color: COLORS.softGold }}>{hasMC ? `${m.rangeLo}–${m.rangeHi}` : '…'}</Text>
+                <Text style={{ fontFamily: UI_FONTS.medium, fontSize: 9, color: COLORS.softGold, letterSpacing: 0.5, marginTop: 2 }}>RANGE</Text>
+              </View>
+            </View>
+          )}
           <View style={mo.golferHeader}>
             <Text style={[mo.golferHText, { flex: 1 }]}>GOLFER</Text>
             <Text style={[mo.golferHText, { width: 36 }]}>POS</Text>
-            <Text style={[mo.golferHText, { width: 40 }]}>PTS</Text>
-            <Text style={[mo.golferHText, { width: 44, textAlign: 'right' }]}>PROJ</Text>
+            <Text style={[mo.golferHText, { width: 40, textAlign: 'right' }]}>PTS</Text>
           </View>
           {m.golfers.map((g, j) => (
             <View key={j} style={[mo.golferRow, g.missedCut && { opacity: 0.5 }]}>
@@ -1867,8 +1984,7 @@ function ModelScreen() {
                 <Text style={[mo.golferName, g.missedCut && { textDecorationLine: 'line-through', textDecorationColor: COLORS.overPar }]} numberOfLines={1}>{g.name}</Text>
               </View>
               <Text style={mo.golferPos}>{g.position}</Text>
-              <Text style={[mo.golferPts, { color: g.points >= 0 ? COLORS.fairwayGreen : COLORS.overPar }]}>{g.points}</Text>
-              <Text style={[mo.golferProj, { color: g.projected >= 0 ? COLORS.softGold : COLORS.overPar }]}>{g.projected}</Text>
+              <Text style={[mo.golferPts, { color: g.points >= 0 ? COLORS.fairwayGreen : COLORS.overPar }]}>{hasScores ? g.points : '-'}</Text>
             </View>
           ))}
         </View>
