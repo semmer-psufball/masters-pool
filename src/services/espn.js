@@ -24,16 +24,18 @@ function parseCompetitors(competitors, tournamentStatus) {
     // Derive "thru" from hole-by-hole data in the latest active round.
     // ESPN doesn't provide status.thru on the competitor object — we calculate
     // it from the number of hole linescores in the current round.
+    // Note: ESPN includes empty placeholder rounds (e.g. round 2 with no data),
+    // so we find the last round that actually has hole scores.
     let thru = '';
-    if (rounds.length > 0) {
-      const latestRound = rounds[rounds.length - 1];
-      const holesPlayed = latestRound.holes.length;
+    for (let i = rounds.length - 1; i >= 0; i--) {
+      const holesPlayed = rounds[i].holes.length;
       if (holesPlayed >= 18) {
         thru = 'F';
+        break;
       } else if (holesPlayed > 0) {
         thru = String(holesPlayed);
+        break;
       }
-      // holesPlayed === 0 means round hasn't started, leave thru as ''
     }
 
     return {
