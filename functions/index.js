@@ -757,9 +757,21 @@ exports.snapshotRoundEnd = onSchedule({
     const targetRound = lastSnapshotted + 1;
     if (targetRound > 4) return; // All 4 rounds done
 
+    // For R4 snapshot: wait until the ENTIRE tournament is complete (including playoff).
+    // ESPN may show all 72 holes done but a playoff in progress — we need the playoff
+    // to resolve so final positions reflect the playoff winner (1st, not T1).
+    const tournamentStatus = (event.status?.type?.description || "").toLowerCase();
+    if (targetRound === 4) {
+      if (tournamentStatus !== "final" && tournamentStatus !== "completed") {
+        console.log(`Round 4 snapshot waiting for tournament to finalize (status: ${tournamentStatus})`);
+        return;
+      }
+    }
+
     // Check if ALL active players have completed the target round.
     // "Active" = not cut, not withdrawn, not DNS.
     // A player has completed round N if they have N linescores entries
+    // (only counting periods 1-4, not playoff period 5+)
     // AND their status for that round shows "F" (finished) or they have
     // more rounds than N (meaning they've moved on to N+1).
     const activePlayers = [];
@@ -774,7 +786,7 @@ exports.snapshotRoundEnd = onSchedule({
           status === "disqualified" || status === "dq") {
         // Cut only happens after R2, so for R1/R2 snapshots these players are still active
         if (targetRound <= 2) {
-          const rounds = c.linescores || [];
+          const rounds = (c.linescores || []).filter(r => !r.period || r.period <= 4);
           if (rounds.length < targetRound) {
             allFinished = false;
             break;
@@ -783,7 +795,8 @@ exports.snapshotRoundEnd = onSchedule({
         continue;
       }
 
-      const rounds = c.linescores || [];
+      // Only count regulation rounds (periods 1-4), not playoff (period 5+)
+      const rounds = (c.linescores || []).filter(r => !r.period || r.period <= 4);
       if (rounds.length < targetRound) {
         // Player hasn't started or finished this round yet
         allFinished = false;
@@ -817,12 +830,14 @@ exports.snapshotRoundEnd = onSchedule({
       return;
     }
 
-    // Build position data: sort by total score, compute positions with ties
-    const sorted = [...competitors]
+    // Build position data.
+    // For R4: use ESPN's competitor order which reflects playoff results
+    // (winner gets 1st, runner-up gets 2nd — not averaged T1).
+    // For R1-R3: sort by total score and compute tie-aware positions.
+    const filtered = [...competitors]
       .filter(c => {
         const status = (c.status?.type?.description || "").toLowerCase();
-        // For the snapshot, include all players who have completed this round
-        const rounds = c.linescores || [];
+        const rounds = (c.linescores || []).filter(r => !r.period || r.period <= 4);
         return rounds.length >= targetRound &&
           status !== "did not start" && status !== "dns";
       })
@@ -832,23 +847,34 @@ exports.snapshotRoundEnd = onSchedule({
           name: c.athlete?.displayName || "Unknown",
           id: c.athlete?.id || c.id,
           totalScoreNum: score,
+          order: c.order || 999,
           status: (c.status?.type?.description || "").toLowerCase(),
         };
-      })
-      .sort((a, b) => a.totalScoreNum - b.totalScoreNum);
+      });
+
+    // For R4 after playoff: use ESPN's order (reflects playoff outcome)
+    // For R1-R3: sort by score
+    const sorted = targetRound === 4
+      ? filtered.sort((a, b) => a.order - b.order)
+      : filtered.sort((a, b) => a.totalScoreNum - b.totalScoreNum);
 
     // Calculate positions with tie awareness
     let pos = 1;
     const snapshot = {};
     for (let i = 0; i < sorted.length; i++) {
-      if (i > 0 && sorted[i].totalScoreNum !== sorted[i - 1].totalScoreNum) {
+      if (targetRound === 4) {
+        // Use ESPN order directly — playoff breaks ties
+        pos = sorted[i].order;
+      } else if (i > 0 && sorted[i].totalScoreNum !== sorted[i - 1].totalScoreNum) {
         pos = i + 1;
       }
       const isCut = sorted[i].status === "cut";
       const isWd = sorted[i].status === "withdrawn" || sorted[i].status === "wd" ||
                    sorted[i].status === "disqualified" || sorted[i].status === "dq";
-      const tiedCount = sorted.filter(p => p.totalScoreNum === sorted[i].totalScoreNum &&
-        p.status !== "cut" && p.status !== "withdrawn" && p.status !== "wd").length;
+      const tiedCount = targetRound === 4
+        ? filtered.filter(p => p.order === sorted[i].order).length
+        : sorted.filter(p => p.totalScoreNum === sorted[i].totalScoreNum &&
+            p.status !== "cut" && p.status !== "withdrawn" && p.status !== "wd").length;
 
       snapshot[sorted[i].name.toLowerCase()] = {
         name: sorted[i].name,

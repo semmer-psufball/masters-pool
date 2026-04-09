@@ -3,13 +3,13 @@ const ESPN_BASE = 'https://site.api.espn.com/apis/site/v2/sports/golf/pga';
 // 2026 Masters: April 9-12 at Augusta National
 const MASTERS_DATE_RANGE = '20260409-20260413';
 
-function parseCompetitors(competitors) {
+function parseCompetitors(competitors, tournamentStatus) {
   const players = (competitors || []).map(c => {
     const score = typeof c.score === 'string' ? c.score : c.score?.displayValue || 'E';
     const scoreNum = parseInt(score) || 0;
 
     const rounds = (c.linescores || [])
-      .filter(r => r.value != null)  // skip ESPN's empty pre-tournament stubs
+      .filter(r => r.value != null && (!r.period || r.period <= 4))  // skip empty stubs + playoff (period 5+)
       .map(r => ({
         strokes: String(Math.round(r.value)),
         toPar: r.displayValue || '-',
@@ -29,6 +29,7 @@ function parseCompetitors(competitors) {
       country: c.athlete?.flag?.alt || '',
       flagUrl: c.athlete?.flag?.href || null,
       position: c.order || 999,
+      espnOrder: c.order || 999,
       totalScore: score,
       totalScoreNum: scoreNum,
       thru: c.status?.thru?.displayValue || '',
@@ -72,14 +73,29 @@ function parseCompetitors(competitors) {
   }
 
   // Calculate tie-aware positions: T3, T7, etc.
-  let pos = 1;
-  for (let i = 0; i < players.length; i++) {
-    if (i > 0 && players[i].totalScoreNum !== players[i - 1].totalScoreNum) {
-      pos = i + 1;
+  // When tournament is final, ESPN's order reflects playoff results —
+  // use it so the playoff winner gets 1st (not T1).
+  const isFinal = (tournamentStatus || '').toLowerCase() === 'final' ||
+                  (tournamentStatus || '').toLowerCase() === 'completed';
+
+  if (isFinal) {
+    // Use ESPN's order directly — playoff breaks ties at the top
+    for (const p of players) {
+      if (p.missedCut) { p.positionDisplay = 'MC'; continue; }
+      const sameOrder = players.filter(q => q.espnOrder === p.espnOrder && !q.missedCut).length;
+      p.position = p.espnOrder;
+      p.positionDisplay = sameOrder > 1 ? `T${p.espnOrder}` : String(p.espnOrder);
     }
-    const count = players.filter(p => p.totalScoreNum === players[i].totalScoreNum).length;
-    players[i].position = pos;
-    players[i].positionDisplay = (players[i].missedCut ? 'MC' : (count > 1 ? `T${pos}` : String(pos)));
+  } else {
+    let pos = 1;
+    for (let i = 0; i < players.length; i++) {
+      if (i > 0 && players[i].totalScoreNum !== players[i - 1].totalScoreNum) {
+        pos = i + 1;
+      }
+      const count = players.filter(p => p.totalScoreNum === players[i].totalScoreNum && !p.missedCut).length;
+      players[i].position = pos;
+      players[i].positionDisplay = (players[i].missedCut ? 'MC' : (count > 1 ? `T${pos}` : String(pos)));
+    }
   }
 
   return players;
@@ -189,7 +205,7 @@ export async function getLeaderboard() {
       location: competition?.venue?.fullName,
     };
 
-    return { tournament, players: parseCompetitors(competition?.competitors) };
+    return { tournament, players: parseCompetitors(competition?.competitors, tournament.status) };
   } catch (err) {
     console.error('ESPN leaderboard error:', err);
     return { tournament: null, players: [] };
@@ -218,7 +234,7 @@ export async function getMastersField() {
       startDate: event.date,
     };
 
-    return { tournament, players: parseCompetitors(competition?.competitors) };
+    return { tournament, players: parseCompetitors(competition?.competitors, tournament.status) };
   } catch (err) {
     console.error('ESPN field error:', err);
     return { tournament: null, players: [] };
